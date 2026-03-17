@@ -8,9 +8,6 @@ from sklearn.neighbors import NearestNeighbors
 
 
 def compute_local_entropy_score(X, y, n_neighbors=10):
-    """
-    Compute Local Entropy Score (LES) for each sample.
-    """
     X = np.asarray(X)
     y = np.asarray(y)
     N = len(y)
@@ -42,9 +39,6 @@ def compute_local_entropy_score(X, y, n_neighbors=10):
 
 
 def _compute_entropy_vectorized(p):
-    """
-    Compute Shannon entropy for each row of probability matrix
-    """
     with np.errstate(divide='ignore', invalid='ignore'):
         log_p = np.log(p)
         log_p = np.where(p > 0, log_p, 0)
@@ -55,9 +49,6 @@ def _compute_entropy_vectorized(p):
 
 
 def compute_normalized_les(X, y, n_neighbors=10):
-    """
-    Compute normalized LES in [0, 1].
-    """
     H, neighbor_class_dist = compute_local_entropy_score(X, y, n_neighbors)
 
     K = neighbor_class_dist.shape[1]

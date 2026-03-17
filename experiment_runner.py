@@ -1,31 +1,5 @@
 """
 Experiment runner for IA-BMLR revision.
-
-Key additions over the previous version:
-  - Uncertainty outputs (HDI bounds, HDI width, predictive entropy) captured
-    and saved for every fold — addresses Reviewer C's concern about reporting
-    only point estimates.
-  - Kappa sensitivity analysis on the first split of each dataset — addresses
-    Reviewer A's minor comment about sensitivity to the kappa hyperparameter.
-  - Explicit `cores` parameter threaded through to PyMC's pm.sample() call
-    for efficient parallel chain sampling on a cluster node.
-  - Command-line --dataset argument so individual datasets can be submitted
-    as separate cluster jobs and run in parallel across nodes.
-  - Incremental saving: every completed fold and every completed dataset is
-    written to disk immediately, so a crashed job does not lose prior work.
-
-Cluster usage
--------------
-Submit one job per dataset:
-    python experiment_runner.py --dataset yeast
-    python experiment_runner.py --dataset pageblocks
-    ... etc.
-
-Set CORES in config.py PYMC_SETTINGS to match cores allocated per job.
-Set the environment variable before running:
-    export PYTENSOR_FLAGS="blas__ldflags=-lopenblas"
-This tells PyTensor to use optimized BLAS for the matrix operations in the
-weight computation (pt.dot calls), which gives a meaningful speedup.
 """
 
 import os
@@ -50,12 +24,8 @@ from model_ia_bmlr import IABMLR
 from model_standard_bmlr import StandardBMLR
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Baseline model helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def fit_baseline_model(model, X_train, y_train, X_test, y_test):
-    """Fit a single sklearn-compatible baseline and return train/test metrics."""
     model.fit(X_train, y_train)
     y_pred      = model.predict(X_test)
     y_proba     = model.predict_proba(X_test) if hasattr(model, 'predict_proba') else None
@@ -68,7 +38,6 @@ def fit_baseline_model(model, X_train, y_train, X_test, y_test):
 
 
 def fit_all_baselines(X_train, y_train, X_test, y_test, config):
-    """Fit all four baseline classifiers and return a results dict."""
     results = {}
     baseline_config = config.get('BASELINE_MODELS', {})
 
@@ -120,16 +89,7 @@ def fit_all_baselines(X_train, y_train, X_test, y_test, config):
     return results
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Bayesian model helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _build_ia_bmlr(config, kappa_override=None):
-    """
-    Instantiate IABMLR from config, with an optional kappa override for the
-    sensitivity analysis.  The cores parameter is passed explicitly so that
-    cluster jobs can use all allocated CPU cores for parallel chain sampling.
-    """
     pymc_cfg = config.get('PYMC_SETTINGS', {})
     ia_cfg   = config.get('IA_BMLR', {})
     kappa    = kappa_override if kappa_override is not None else ia_cfg.get('les_neighbors', 10)
@@ -146,17 +106,6 @@ def _build_ia_bmlr(config, kappa_override=None):
 
 
 def fit_ia_bmlr_fold(X_train, y_train, X_test, y_test, config, verbose=False, kappa_override=None):
-    """
-    Fit IA-BMLR on a single fold.
-
-    Returns metrics and, when UNCERTAINTY.compute is True, the full
-    observation-level uncertainty summary (HDI bounds, HDI width, predictive
-    entropy) for the test set.  These outputs directly demonstrate the
-    Bayesian uncertainty quantification advantage that Reviewer C is asking for.
-
-    Note that evaluate_train_test now returns four values — the old two-value
-    unpack would raise a ValueError, which is exactly the bug fixed here.
-    """
     unc_cfg  = config.get('UNCERTAINTY', {})
     do_unc   = unc_cfg.get('compute', True)
     hdi_prob = unc_cfg.get('hdi_prob', 0.95)
@@ -184,14 +133,6 @@ def fit_ia_bmlr_fold(X_train, y_train, X_test, y_test, config, verbose=False, ka
 
 
 def fit_standard_bmlr_fold(X_train, y_train, X_test, y_test, config, verbose=False):
-    """
-    Fit Standard BMLR on a single fold.
-
-    Capturing uncertainty outputs here as well enables a direct comparison of
-    predictive confidence between the weighted and unweighted Bayesian models,
-    which is a stronger demonstration of the weighting scheme's benefit than
-    comparing point predictions alone.
-    """
     unc_cfg  = config.get('UNCERTAINTY', {})
     do_unc   = unc_cfg.get('compute', True)
     hdi_prob = unc_cfg.get('hdi_prob', 0.95)
@@ -228,22 +169,6 @@ def fit_standard_bmlr_fold(X_train, y_train, X_test, y_test, config, verbose=Fal
 
 
 def _serialise_uncertainty(unc_dict):
-    """
-    Convert numpy arrays in an uncertainty dict to Python lists for JSON
-    serialisation, and add three scalar summaries that are directly reportable
-    in the paper without the reader needing to inspect per-observation arrays.
-
-    mean_hdi_width_per_class is a vector of length K giving the average HDI
-    width for each class — narrow values mean the model is consistently
-    confident about predictions for that class.
-
-    mean_pred_entropy is a single number summarising overall uncertainty on
-    this split, comparable across datasets and between methods.
-
-    frac_uncertain_predictions is the fraction of test observations whose
-    predicted-class HDI width exceeds 0.2, giving a sense of how many
-    individual predictions are genuinely uncertain.
-    """
     serialised = {}
     for key, val in unc_dict.items():
         serialised[key] = val.tolist() if isinstance(val, np.ndarray) else val
@@ -265,14 +190,6 @@ def _serialise_uncertainty(unc_dict):
 
 
 def _aggregate_uncertainty_across_folds(fold_uncertainty_list):
-    """
-    Aggregate scalar uncertainty summaries across CV folds (mean and std).
-
-    This gives Reviewer C exactly what they asked for: the uncertainty
-    estimates themselves come with standard errors across folds, so the
-    reader can judge whether differences in, say, mean HDI width between
-    IA-BMLR and U-BMLR are consistent or fold-dependent.
-    """
     if not fold_uncertainty_list:
         return {}
 
@@ -294,18 +211,7 @@ def _aggregate_uncertainty_across_folds(fold_uncertainty_list):
     return aggregated
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Kappa sensitivity analysis  (Reviewer A minor comment)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def run_kappa_sensitivity(X_train, y_train, X_test, y_test, config, verbose=False):
-    """
-    Fit IA-BMLR under each value in KAPPA_SENSITIVITY['kappa_values'] using
-    only the first fold's split.  For each kappa we record performance metrics,
-    the learned gamma, and LES score statistics.  Running on a single split
-    rather than full CV keeps the cost proportional to one extra MCMC run per
-    kappa value, which is manageable even on a modest cluster node.
-    """
     kappa_values = config.get('KAPPA_SENSITIVITY', {}).get('kappa_values', [5, 10, 15, 20])
     kappa_results = {}
 
@@ -323,7 +229,6 @@ def run_kappa_sensitivity(X_train, y_train, X_test, y_test, config, verbose=Fals
                 'les_max':       float(model.les_scores.max()),
             }
             if 'test_uncertainty' in result:
-                # Save only scalar summaries — the per-observation arrays are large
                 kappa_results[kappa]['uncertainty_summary'] = {k: v for k, v in result['test_uncertainty'].items() if not isinstance(v, list)}
             print(f" G-Mean={result['test_metrics'].get('g_mean', 0):.4f}, gamma={result['learned_gamma']:.4f}, LES mean={model.les_scores.mean():.4f}")
         except Exception as e:
@@ -333,20 +238,7 @@ def run_kappa_sensitivity(X_train, y_train, X_test, y_test, config, verbose=Fals
 
     return kappa_results
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main experiment runner
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ExperimentRunner:
-    """
-    Runs the full experimental pipeline for one or all datasets.
-
-    Every completed fold and every completed dataset is saved to disk
-    immediately, making the runner safe for cluster environments where jobs
-    may be preempted or time-limited.
-    """
-
     def __init__(self, config=CONFIG):
         self.config  = config
         self.results = {}
@@ -354,11 +246,6 @@ class ExperimentRunner:
         os.makedirs(config['PLOTS_DIR'],   exist_ok=True)
 
     def run_single_dataset(self, dataset_name, dataset_config):
-        """Run all experiments on a single dataset and save results to disk."""
-        print("\n" + "=" * 70)
-        print(f"DATASET: {dataset_name}")
-        print("=" * 70)
-
         dataset_results_dir = os.path.join(self.config['RESULTS_DIR'], dataset_name)
         dataset_plots_dir   = os.path.join(self.config['PLOTS_DIR'],   dataset_name)
         os.makedirs(dataset_results_dir, exist_ok=True)
@@ -379,7 +266,6 @@ class ExperimentRunner:
         print(f"\nStarted: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         X, y, feature_names, class_names, label_mapping = load_dataset(dataset_config, stratifying=False, return_dataframe=True)
-        print(f"Samples: {len(X)} | Features: {len(feature_names)} | Classes: {len(class_names)}")
         print_class_distribution(y, class_names, "Original Data")
 
         class_stats = compute_class_statistics(y, class_names)
@@ -388,7 +274,6 @@ class ExperimentRunner:
         unique, counts = np.unique(y, return_counts=True)
         if counts.min() < n_splits:
             n_splits = max(2, int(counts.min()))
-            print(f"WARNING: Smallest class has {counts.min()} samples. Reducing n_splits to {n_splits}.")
 
         dataset_results = {
             'dataset_name':    dataset_name,
@@ -410,11 +295,7 @@ class ExperimentRunner:
         last_fold_models = {}
         kappa_sensitivity_done = False
 
-        # ── K-fold cross-validation loop ──────────────────────────────────────
         for fold_num, train_idx, test_idx in create_cv_splits_indices(X, y, n_splits=n_splits, random_state=self.config['RANDOM_STATE']):
-
-            print(f"\n{'─'*50}\nFOLD {fold_num}/{n_splits}\n{'─'*50}")
-
             X_train_df = X.iloc[train_idx].reset_index(drop=True)
             X_test_df  = X.iloc[test_idx].reset_index(drop=True)
             y_train    = y[train_idx]
@@ -422,16 +303,14 @@ class ExperimentRunner:
 
             X_train, X_test, _ = preprocess_cv_fold(X_train_df, X_test_df, scale=True, verbose=(fold_num == 1))
 
-            # 1. Baselines
             print("\n  BASELINE CLASSIFIERS")
             try:
                 for name, result in fit_all_baselines(X_train, y_train, X_test, y_test, self.config).items():
                     fold_results[name]['train'].append(result['train_metrics'])
                     fold_results[name]['test'].append(result['test_metrics'])
             except Exception as e:
-                print(f"  Baseline error: {e}"); traceback.print_exc()
+                traceback.print_exc()
 
-            # 2. IA-BMLR
             print("\n  IA-BMLR")
             ia_result = None
             try:
@@ -442,11 +321,9 @@ class ExperimentRunner:
                 last_fold_models['ia_bmlr'] = ia_result['model']
                 if 'test_uncertainty' in ia_result:
                     unc_folds['ia_bmlr'].append(ia_result['test_uncertainty'])
-                print(f"  IA-BMLR fold {fold_num}: G-Mean={ia_result['test_metrics'].get('g_mean',0):.4f}, gamma={ia_result['learned_gamma']:.4f}")
             except Exception as e:
-                print(f"  IA-BMLR error: {e}"); traceback.print_exc()
+                traceback.print_exc()
 
-            # 3. Standard BMLR
             print("\n  STANDARD BMLR")
             std_result = None
             try:
@@ -457,27 +334,19 @@ class ExperimentRunner:
                 if 'test_uncertainty' in std_result:
                     unc_folds['standard_bmlr'].append(std_result['test_uncertainty'])
             except Exception as e:
-                print(f"  Standard BMLR error: {e}"); traceback.print_exc()
+                traceback.print_exc()
 
-            # 4. Kappa sensitivity — first fold only to control cost.
-            # Every additional kappa value costs one full MCMC run, so running
-            # on only fold 1 keeps the total overhead to 3-4 extra runs per dataset.
             if self.config.get('KAPPA_SENSITIVITY', {}).get('run', True) \
                     and not kappa_sensitivity_done:
-                print("\n  KAPPA SENSITIVITY (fold 1 only)")
                 try:
                     kappa_results = run_kappa_sensitivity(X_train, y_train, X_test, y_test, self.config)
                     dataset_results['kappa_sensitivity'] = kappa_results
                     kappa_path = os.path.join(dataset_results_dir, 'kappa_sensitivity.json')
                     save_results(kappa_results, kappa_path)
-                    print(f"  Kappa sensitivity saved: {kappa_path}")
                 except Exception as e:
-                    print(f"  Kappa sensitivity error: {e}"); traceback.print_exc()
+                    traceback.print_exc()
                 kappa_sensitivity_done = True
 
-            # Save fold-level uncertainty to disk immediately after every fold.
-            # This is the most important incremental save — if the next fold
-            # crashes, we still have the uncertainty data from all prior folds.
             fold_unc_path = os.path.join(
                 dataset_results_dir, f'fold_{fold_num}_uncertainty.json')
             fold_unc_snapshot = {
@@ -488,13 +357,7 @@ class ExperimentRunner:
             save_results(fold_unc_snapshot, fold_unc_path)
 
             if self.config.get('SINGLE_SPLIT', False):
-                print("\n[SINGLE_SPLIT mode: stopping after fold 1]")
                 break
-
-        # ── Aggregate across folds ─────────────────────────────────────────────
-        print("\n" + "=" * 70)
-        print("AGGREGATING RESULTS")
-        print("=" * 70)
 
         method_names = {
             'multinomial_lr': 'Multinomial LR', 'random_forest': 'Random Forest',
@@ -530,9 +393,6 @@ class ExperimentRunner:
                 'n_folds': len(fold_data['test']),
             }
 
-        # Attach aggregated uncertainty summaries for Bayesian models.
-        # These give Reviewer C standard errors on the uncertainty quantities,
-        # not just standard errors on the point-estimate metrics.
         for bm in ['ia_bmlr', 'standard_bmlr']:
             if unc_folds[bm] and bm in dataset_results['models']:
                 dataset_results['models'][bm]['uncertainty_summary'] =  _aggregate_uncertainty_across_folds(unc_folds[bm])
@@ -557,13 +417,11 @@ class ExperimentRunner:
         return dataset_results
 
     def run_all_datasets(self, dataset_names=None):
-        """Run experiments on all datasets sequentially."""
         if dataset_names is None:
             dataset_names = list(DATASETS.keys())
         for i, name in enumerate(dataset_names, 1):
-            print(f"\n{'#'*70}\n# DATASET {i}/{len(dataset_names)}: {name}\n{'#'*70}")
             if name not in DATASETS:
-                print(f"Warning: '{name}' not found in DATASETS config."); continue
+                continue
             results = self.run_single_dataset(name, DATASETS[name])
             self.results[name] = results
             self.save_dataset_results(name, results)
@@ -580,33 +438,20 @@ class ExperimentRunner:
         save_results(self.results, os.path.join(self.config['RESULTS_DIR'], 'all_results.json'))
 
     def print_summary(self, dataset_name, dataset_results):
-        print("\n" + "=" * 70)
-        print(f"CV SUMMARY — {dataset_name}")
-        print("=" * 70)
-
         def safe(d, k, default=0.0):
             v = d.get(k, default)
             return default if (v is None or (isinstance(v, float) and np.isnan(v))) else v
 
         models = dataset_results.get('models', {})
-        print(f"\n{'Method':<20} {'Test F1':>14} {'Bal Acc':>14} {'G-Mean':>12}")
-        print("-" * 65)
         for model_name, res in sorted(
                 models.items(),
                 key=lambda x: safe(x[1].get('test_metrics', {}), 'f1'), reverse=True):
             if 'test_metrics' not in res:
                 continue
-            tm  = res['test_metrics']
-            std = res.get('test_metrics_std', {})
-            print(f"{res.get('method', model_name)[:20]:<20} "
-                  f"{safe(tm,'f1'):.4f}±{safe(std,'f1'):.4f}  "
-                  f"{safe(tm,'balanced_accuracy'):.4f}±{safe(std,'balanced_accuracy'):.4f}  "
-                  f"{safe(tm,'g_mean'):.4f}±{safe(std,'g_mean'):.4f}")
 
         ia = models.get('ia_bmlr', {})
         if 'uncertainty_summary' in ia:
             u = ia['uncertainty_summary']
-            print(f"\n  IA-BMLR uncertainty summary (mean ± std across folds):")
             for label, key in [
                 ("Mean HDI width",        'mean_hdi_width_overall'),
                 ("Mean pred entropy",     'mean_pred_entropy'),
@@ -621,19 +466,13 @@ class ExperimentRunner:
                   f"{ia['learned_gamma_mean']:.4f} ± {ia['learned_gamma_std']:.4f}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point with command-line argument for cluster job submission
-# ─────────────────────────────────────────────────────────────────────────────
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="IA-BMLR experiment runner. "
-                    "Use --dataset to run a single dataset as a standalone cluster job."
     )
     parser.add_argument(
         '--dataset', type=str, default=None,
-        help="Name of a single dataset key from DATASETS config (e.g. 'yeast'). "
-             "If omitted, all datasets run sequentially."
+        help="Name of a single dataset key from DATASETS"
     )
     return parser.parse_args()
 
@@ -643,21 +482,14 @@ def main():
     runner = ExperimentRunner()
 
     if args.dataset is not None:
-        # Single-dataset mode — designed for cluster job submission.
-        # Launch one job per dataset: python experiment_runner.py --dataset yeast
         name = args.dataset
         if name not in DATASETS:
-            print(f"ERROR: '{name}' not found in DATASETS. Available: {list(DATASETS.keys())}")
             sys.exit(1)
-        print(f"\nRunning single dataset (cluster mode): {name}")
         results = runner.run_single_dataset(name, DATASETS[name])
         runner.save_dataset_results(name, results)
         runner.print_summary(name, results)
     else:
-        # Sequential mode — runs all datasets one after another.
         runner.run_all_datasets()
-
-    print(f"\n{'='*70}\nEXPERIMENTS COMPLETE\nResults: {CONFIG['RESULTS_DIR']}\n{'='*70}")
 
 
 if __name__ == "__main__":

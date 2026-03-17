@@ -33,11 +33,9 @@ def load_dataset(dataset_config, stratifying=False, n_stratify=100, return_dataf
     X = df[feature_cols]
     y_original = df[target_col].values
 
-    # Encode labels
     le = LabelEncoder()
     y = le.fit_transform(y_original)
 
-    # Create explicit mapping
     label_mapping = {
         'original_to_encoded': {orig: enc for orig, enc in zip(le.classes_, range(len(le.classes_)))},
         'encoded_to_original': {enc: orig for orig, enc in zip(le.classes_, range(len(le.classes_)))},
@@ -56,9 +54,6 @@ def load_dataset(dataset_config, stratifying=False, n_stratify=100, return_dataf
 
 
 def stratified_sample_n(df, label, n, random_state=42):
-    """
-    Return ~n rows sampled from df with class proportions matching the full dataset.
-    """
     rng = np.random.default_rng(random_state)
     counts = df[label].value_counts().sort_index()
     props = counts / counts.sum()
@@ -116,9 +111,6 @@ def preprocess_data(X, y, test_size=0.2, random_state=42, scale=True, feature_na
         X_test_cat = encoder.transform(X_test[cat_cols])
         preprocessor_info['encoder'] = encoder
 
-        if verbose:
-            print(f"One-hot encoded {len(cat_cols)} features to {X_train_cat.shape[1]} columns")
-
     if X_train_num is not None and X_train_cat is not None:
         X_train_final = np.hstack([X_train_num, X_train_cat])
         X_test_final = np.hstack([X_test_num, X_test_cat])
@@ -135,20 +127,11 @@ def preprocess_data(X, y, test_size=0.2, random_state=42, scale=True, feature_na
 
 
 def preprocess_cv_fold(X_train_df, X_test_df, scale=True, verbose=False):
-    """
-    Preprocess a single CV fold (no splitting, just scaling and encoding).
-    """
     cat_cols = X_train_df.select_dtypes(include=['object', 'category']).columns.tolist()
     num_cols = X_train_df.select_dtypes(include=[np.number]).columns.tolist()
 
-    preprocessor_info = {
-        'numeric_features': num_cols.copy(),
-        'categorical_features': cat_cols.copy(),
-        'scaler': None,
-        'encoder': None,
-    }
+    preprocessor_info = {'numeric_features': num_cols.copy(), 'categorical_features': cat_cols.copy(), 'scaler': None, 'encoder': None}
 
-    # Process numerical columns
     X_train_num = X_train_df[num_cols].values.astype(float) if num_cols else None
     X_test_num = X_test_df[num_cols].values.astype(float) if num_cols else None
 
@@ -158,7 +141,6 @@ def preprocess_cv_fold(X_train_df, X_test_df, scale=True, verbose=False):
         X_test_num = scaler.transform(X_test_num)
         preprocessor_info['scaler'] = scaler
 
-    # Process categorical columns
     X_train_cat = None
     X_test_cat = None
 
@@ -168,10 +150,6 @@ def preprocess_cv_fold(X_train_df, X_test_df, scale=True, verbose=False):
         X_test_cat = encoder.transform(X_test_df[cat_cols])
         preprocessor_info['encoder'] = encoder
 
-        if verbose:
-            print(f"One-hot encoded {len(cat_cols)} features to {X_train_cat.shape[1]} columns")
-
-    # Combine
     if X_train_num is not None and X_train_cat is not None:
         X_train = np.hstack([X_train_num, X_train_cat])
         X_test = np.hstack([X_test_num, X_test_cat])
@@ -188,9 +166,6 @@ def preprocess_cv_fold(X_train_df, X_test_df, scale=True, verbose=False):
 
 
 def create_cv_splits_indices(X, y, n_splits=5, random_state=42):
-    """
-    Create stratified K-fold splits (yields indices only).
-    """
     y = np.asarray(y)
 
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
@@ -200,9 +175,6 @@ def create_cv_splits_indices(X, y, n_splits=5, random_state=42):
 
 
 def compute_metrics(y_true, y_pred, y_pred_proba=None):
-    """
-    Compute comprehensive evaluation metrics.
-    """
     metrics = {
         'accuracy': accuracy_score(y_true, y_pred),
         'precision': precision_score(y_true, y_pred, average='macro', zero_division=0),
@@ -211,25 +183,6 @@ def compute_metrics(y_true, y_pred, y_pred_proba=None):
         'balanced_accuracy': balanced_accuracy_score(y_true, y_pred),
         'g_mean': geometric_mean_score(y_true, y_pred, average='multiclass'),
     }
-    #
-    # try:
-    #     g_mean_val = geometric_mean_score(y_true, y_pred, average='multiclass')
-    #     metrics['g_mean'] = g_mean_val
-    # except Exception as e:
-    #     metrics['g_mean'] = 0.0
-    #
-    # per_class_recall = recall_score(y_true, y_pred, average=None, zero_division=0)
-    # metrics['per_class_recall'] = per_class_recall.tolist()
-    #
-    # # If G-Mean is 0 due to a missing class, compute a "soft" G-Mean
-    # # that uses a small epsilon instead of 0 (for comparison purposes only)
-    # if metrics['g_mean'] == 0 and len(per_class_recall) > 0:
-    #     # Add small epsilon to zero recalls for soft G-Mean
-    #     eps = 1e-6
-    #     soft_recalls = np.maximum(per_class_recall, eps)
-    #     metrics['g_mean_soft'] = float(np.prod(soft_recalls) ** (1.0 / len(soft_recalls)))
-    # else:
-    #     metrics['g_mean_soft'] = metrics['g_mean']
 
     if y_pred_proba is not None:
         try:
@@ -239,7 +192,6 @@ def compute_metrics(y_true, y_pred, y_pred_proba=None):
             metrics['roc_auc_ovr'] = np.nan
             metrics['log_loss'] = np.nan
 
-    # Per-class metrics
     metrics['per_class_precision'] = precision_score(y_true, y_pred, average=None, zero_division=0).tolist()
     metrics['per_class_recall'] = recall_score(y_true, y_pred, average=None, zero_division=0).tolist()
     metrics['per_class_f1'] = f1_score(y_true, y_pred, average=None, zero_division=0).tolist()
@@ -249,16 +201,10 @@ def compute_metrics(y_true, y_pred, y_pred_proba=None):
 
 
 def compute_class_statistics(y, class_names):
-    """Compute class distribution statistics."""
     unique, counts = np.unique(y, return_counts=True)
     total = len(y)
 
-    stats = {
-        'total_samples': total,
-        'n_classes': len(unique),
-        'class_distribution': {},
-        'imbalance_ratio': None,
-    }
+    stats = {'total_samples': total, 'n_classes': len(unique), 'class_distribution': {}, 'imbalance_ratio': None}
 
     for cls, count in zip(unique, counts):
         cls_name = class_names[cls] if cls < len(class_names) else f"Class_{cls}"
@@ -269,23 +215,7 @@ def compute_class_statistics(y, class_names):
     return stats
 
 
-# def create_cv_splits(X, y, n_splits=5, random_state=42):
-#     """Create stratified K-fold splits."""
-#     X = np.asarray(X)
-#     y = np.asarray(y)
-#
-#     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-#     for fold_num, (train_idx, test_idx) in enumerate(skf.split(X, y), 1):
-#         X_train, X_test = X[train_idx], X[test_idx]
-#         y_train, y_test = y[train_idx], y[test_idx]
-#
-#         yield fold_num, X_train, X_test, y_train, y_test
-
-
 def aggregate_cv_results(fold_results):
-    """
-    Aggregate metrics across CV folds.
-    """
     if not fold_results:
         return {}
 
@@ -311,7 +241,6 @@ def aggregate_cv_results(fold_results):
 
 
 def save_results(results, filepath):
-    """Save results to JSON file."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
     def clean_dict(d):
@@ -352,14 +281,12 @@ def save_results(results, filepath):
 
 
 def load_results(filepath):
-    """Load results from JSON file."""
     with open(filepath, 'r') as f:
         results = json.load(f)
     return results
 
 
 def print_class_distribution(y, class_names, title="Class Distribution"):
-    """Print formatted class distribution."""
     print(f"\n{title}")
     print("-" * 50)
     unique, counts = np.unique(y, return_counts=True)

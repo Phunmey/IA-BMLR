@@ -7,74 +7,16 @@ CONFIG = {'RANDOM_STATE': 42,
     'SINGLE_SPLIT': False,
     'TEST_SIZE': 0.2,
 
-    # ============================================================
-    # PYMC SETTINGS (MCMC)
-    # ============================================================
-    'PYMC_SETTINGS': {
-        'n_samples': 5000,      # Posterior samples per chain
-        'n_tune': 5000,         # Tuning samples per chain
-        'n_chains': 4,          # Number of chains
-        'cores': 1,             # CPU cores for parallel chain sampling.
-                                # Set to the number of cores available on
-                                # your cluster node. When cores == n_chains,
-                                # all chains run simultaneously, giving the
-                                # maximum wall-clock speedup.
-        'target_accept': 0.95,  # Target acceptance rate
-    },
+    'PYMC_SETTINGS': {'n_samples': 5000,  'n_tune': 5000,  'n_chains': 4,   'cores': 1,  'target_accept': 0.95},
 
-    # ============================================================
-    # UNCERTAINTY QUANTIFICATION SETTINGS
-    # ============================================================
-    # Controls whether the full predictive uncertainty summary
-    # (HDI bounds, HDI width, predictive entropy) is computed and
-    # saved alongside the standard performance metrics.
-    # Adds modest overhead on top of sampling cost, but captures
-    # all outputs needed to demonstrate the Bayesian advantage
-    # over frequentist baselines (Reviewer C).
-    'UNCERTAINTY': {
-        'compute': True,        # Set False to skip HDI computation
-        'hdi_prob': 0.95,       # Probability mass enclosed by HDI
-    },
+    'UNCERTAINTY': {'compute': True,  'hdi_prob': 0.95},
 
-    # ============================================================
-    # KAPPA SENSITIVITY SETTINGS  (Reviewer A minor comment)
-    # ============================================================
-    # Runs IA-BMLR under several kappa values on the first split
-    # only (not full CV) to keep cost manageable. Results are
-    # saved alongside the main CV results for each dataset.
-    'KAPPA_SENSITIVITY': {
-        'run': True,
-        'kappa_values': [5, 10, 15, 20],
-    },
+    'KAPPA_SENSITIVITY': {'run': True, 'kappa_values': [5, 10, 15, 20]},
 
-    # ============================================================
-    # IA-BMLR v2 SETTINGS (Weighted likelihood, no augmentation)
-    # ============================================================
-    # Features:
-    # - Uniform priors: β_k ~ N(0, σ²I) for all k
-    # - Weighted likelihood: w_i = w_class(y_i) × w_entropy(H_i)
-    # - w_class(k) = N / (K × n_k)  [inverse frequency]
-    # - w_entropy(i) = (1 + H_i)^γ  [entropy focus]
-    'IA_BMLR': {
-        'prior_sigma': 1.0,     # Prior std (uniform for all classes)
-        'gamma_prior_sigma': 1.0,           # Entropy focus (0=ignore, higher=more focus)
-        'les_neighbors': 10,    # k for Local Entropy Score
-    },
+    'IA_BMLR': {'prior_sigma': 1.0, 'gamma_prior_sigma': 1.0, 'les_neighbors': 10},
 
-    # ============================================================
-    # STANDARD BMLR SETTINGS (Baseline - no weighting)
-    # ============================================================
-    'STANDARD_BMLR': {
-        'prior_sigma': 1.0,
-    },
-    
-    # SMOTE settings (for baseline)
-    'SMOTE': {
-        'k_neighbors': 5,
-        'sampling_strategy': 'auto',  # Balance to majority class
-    },
-    
-    # Baseline ML models
+    'STANDARD_BMLR': {'prior_sigma': 1.0},
+
     'BASELINE_MODELS': {
         'multinomial_lr': {
             'max_iter': 10000,
@@ -103,8 +45,7 @@ CONFIG = {'RANDOM_STATE': 42,
             'probability': True,
         }
     },
-    
-    # Metrics to compute
+
     'METRICS': [
         'accuracy', 
         'precision', 
@@ -115,13 +56,11 @@ CONFIG = {'RANDOM_STATE': 42,
         'log_loss',
         'g_mean',
     ],
-    
-    # Results directory
+
     'RESULTS_DIR': './outputs/results',
     'PLOTS_DIR': './outputs/plots',
 }
 
-# Dataset configurations
 DATASETS = {
     'hayesroth_data': {
         'path': r'./keel_clean_data/hayesroth.parquet',
@@ -177,10 +116,4 @@ DATASETS = {
         'feature_columns': None,
         'class_names': ['MIT', 'NUC', 'CYT', 'ME1', 'ME2', 'ME3', 'EXC', 'VAC', 'POX', 'ERL'],
     },
-    # 'student_data': {
-    #     'path': r'./keel_clean_data/student.parquet',
-    #     'target_column': 'Status',
-    #     'feature_columns': None,
-    #     'class_names': ['Dropout', 'Enrolled', 'Graduate'],
-    # },
 }
